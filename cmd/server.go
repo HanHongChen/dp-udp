@@ -6,10 +6,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Alonza0314/dp-tcp/logger"
-	"github.com/Alonza0314/dp-tcp/model"
-	"github.com/Alonza0314/dp-tcp/server"
-	"github.com/Alonza0314/dp-tcp/util"
+	"github.com/HanHongChen/dp-udp/logger"
+	"github.com/HanHongChen/dp-udp/model"
+	"github.com/HanHongChen/dp-udp/server"
+	"github.com/HanHongChen/dp-udp/util"
 	loggergo "github.com/Alonza0314/logger-go/v2"
 	loggergoUtil "github.com/Alonza0314/logger-go/v2/util"
 	"github.com/spf13/cobra"
@@ -17,8 +17,8 @@ import (
 
 var serverCmd = &cobra.Command{
 	Use:     "server",
-	Short:   "Start the server",
-	Example: "dp-tcp server",
+	Short:   "Start the UDP server",
+	Example: "dp-udp server",
 	Run:     serverFunc,
 }
 
@@ -48,7 +48,7 @@ func serverFunc(cmd *cobra.Command, args []string) {
 
 	serverLogger := logger.NewServerLogger(loggergoUtil.LogLevelString(serverConfig.LoggerIE.Level), "", true)
 
-	server := server.NewDpTcpServer(serverConfig, serverLogger)
+	server := server.NewDpUdpServer(serverConfig, serverLogger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

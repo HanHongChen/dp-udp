@@ -1,0 +1,13 @@
+server:
+  udp1_listen_addr: 192.168.58.20
+  udp1_listen_port: 31415
+  udp2_listen_addr: 192.168.59.20
+  udp2_listen_port: 31417
+
+  tunnel_device:
+    name: dpUdpTunServer
+    ip: 192.180.20.10
+    route_prefix: 16
+
+logger:
+  level: info

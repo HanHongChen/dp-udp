@@ -7,9 +7,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "dp-tcp",
-	Short: "Dual-Path TCP",
-	Long:  "Dual-Path TCP is a layer 5 application for Dual-Path TCP.",
+	Use:   "dp-udp",
+	Short: "Dual-Path UDP",
+	Long:  "Dual-Path UDP is a layer 5 application for Dual-Path UDP with iperf3 sequence number deduplication.",
 }
 
 func Execute() {

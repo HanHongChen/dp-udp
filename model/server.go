@@ -6,10 +6,10 @@ type ServerConfig struct {
 }
 
 type ServerIE struct {
-	TCP1ListenAddr string `yaml:"tcp1_listen_addr" valid:"required"`
-	TCP1ListenPort int    `yaml:"tcp1_listen_port" valid:"required"`
-	TCP2ListenAddr string `yaml:"tcp2_listen_addr" valid:"required"`
-	TCP2ListenPort int    `yaml:"tcp2_listen_port" valid:"required"`
+	UDP1ListenAddr string `yaml:"udp1_listen_addr" valid:"required"`
+	UDP1ListenPort int    `yaml:"udp1_listen_port" valid:"required"`
+	UDP2ListenAddr string `yaml:"udp2_listen_addr" valid:"required"`
+	UDP2ListenPort int    `yaml:"udp2_listen_port" valid:"required"`
 
 	TunnelDevice TunnelDevice `yaml:"tunnel_device" valid:"required"`
 }

@@ -6,14 +6,14 @@ type ClientConfig struct {
 }
 
 type ClientIE struct {
-	TCP1DialAddr string `yaml:"tcp1_dial_addr" valid:"required"`
-	TCP1DialPort int    `yaml:"tcp1_dial_port" valid:"required"`
-	TCP1ConnAddr string `yaml:"tcp1_conn_addr" valid:"required"`
-	TCP1ConnPort int    `yaml:"tcp1_conn_port" valid:"required"`
-	TCP2DialAddr string `yaml:"tcp2_dial_addr" valid:"required"`
-	TCP2DialPort int    `yaml:"tcp2_dial_port" valid:"required"`
-	TCP2ConnAddr string `yaml:"tcp2_conn_addr" valid:"required"`
-	TCP2ConnPort int    `yaml:"tcp2_conn_port" valid:"required"`
+	UDP1DialAddr string `yaml:"udp1_dial_addr" valid:"required"`
+	UDP1DialPort int    `yaml:"udp1_dial_port" valid:"required"`
+	UDP1ConnAddr string `yaml:"udp1_conn_addr" valid:"required"`
+	UDP1ConnPort int    `yaml:"udp1_conn_port" valid:"required"`
+	UDP2DialAddr string `yaml:"udp2_dial_addr" valid:"required"`
+	UDP2DialPort int    `yaml:"udp2_dial_port" valid:"required"`
+	UDP2ConnAddr string `yaml:"udp2_conn_addr" valid:"required"`
+	UDP2ConnPort int    `yaml:"udp2_conn_port" valid:"required"`
 
 	TunnelDevice TunnelDevice `yaml:"tunnel_device" valid:"required"`
 }

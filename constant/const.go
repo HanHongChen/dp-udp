@@ -2,6 +2,9 @@ package constant
 
 const (
 	BUFFER_SIZE = 4096
+	UDP_HEADER_SIZE_32BIT = 12  // iperf3 UDP header size (sec:4 + usec:4 + seq:4)
+	UDP_HEADER_SIZE_64BIT = 16  // iperf3 UDP header size (sec:4 + usec:4 + seq:8)
+	UDP_HEADER_SIZE = UDP_HEADER_SIZE_64BIT  // Default to 64-bit mode
 )
 
 const (
@@ -11,8 +14,8 @@ const (
 
 	CLIENT_TAG = "CLIENT"
 
-	TCP_1_TAG = "TCP_1"
-	TCP_2_TAG = "TCP_2"
+	UDP_1_TAG = "UDP_1"
+	UDP_2_TAG = "UDP_2"
 
 	TUN_TAG = "TUN"
 )

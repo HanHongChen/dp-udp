@@ -1,42 +1,64 @@
-# dp-tcp
+# Dual-Path UDP (dp-udp)
 
-**Dual Path TCP**: An application for dual path TCP
+**Dual Path UDP**: A layer 5 application implementing dual-path UDP with iperf3 sequence number deduplication.
 
-Dual-Path at here means the packet will be ensure by double transmit.
+Dual-Path here means packets are transmitted over two separate UDP connections for redundancy and increased throughput, with deduplication using iperf3 sequence numbers.
+
+## Features
+
+- **Dual-Path UDP**: Utilizes two separate UDP connections for redundancy and increased throughput
+- **iperf3 Compatible**: Uses iperf3 UDP packet format with sequence numbers for packet ordering and deduplication
+- **Packet Deduplication**: Duplicate packet detection using iperf3 sequence numbers
+- **Out-of-Order Detection**: Identifies and handles out-of-order packets
+- **Tunnel Interface**: Creates and manages TUN devices for transparent packet routing
 
 ## Description
 
-![descp](./images/desp.png)
+As dp-udp starts, it creates a network interface to proxy real data packets. In the above image, packets from the blue network interface to the green network interface undergo packet duplication, while packets from the green network interface to the blue network interface undergo packet deduplication.
 
-As the dp-tcp started, it will create a network interface for proxy real data packet. At the above image, packet from blue network interface to green network interface is doing packet duplication, and the packet from green network interface to blue network interface is doing packet elimination.
+### Packet Format
 
-For duplication, it just duplicates the packet read from blue network interface and write to both TCP links.
+The application uses iperf3-compatible UDP packet format:
 
-For elimination, dp-tcp used a [hashmap](github.com/cornelk/hashmap) to store packet record. This map is efficient and safe for doing concurent map read/write. The record stored in the map is not the original raw packet since it may be very large. dp-tcp used [xxhash](github.com/cornelk/hashmap), a quick hash function, for hashing the packet into an `uint64` value, which makes it easy stored.
+```
+| Timestamp (sec) | Timestamp (usec) | Sequence Number | Payload |
+|     4 bytes     |      4 bytes     |     4 bytes     |   ...   |
+```
 
-With using [hashmap](github.com/cornelk/hashmap) and [xxhash](github.com/cornelk/hashmap), this dp-tcp is achieve a very efficient way to manage packets and connection reliable.
+### Deduplication Logic
+
+Unlike the original TCP version that used hash-based deduplication, dp-udp uses iperf3 sequence numbers for:
+
+1. **Duplicate Detection**: Tracks seen sequence numbers to filter duplicate packets
+2. **Out-of-Order Handling**: Manages packets arriving out of sequence
+3. **Gap Detection**: Identifies lost packets based on sequence number gaps
+4. **Statistics**: Provides detailed packet statistics including duplicates, out-of-order, and lost packets
 
 ## Usage
 
+### Building
+
 ```bash
-git clone git@github.com:Alonza0314/dp-tcp.git
-cd dp-tcp
-make
+git clone git@github.com:HanHongChen/dp-udp.git
+cd dp-udp
+go build -o dp-udp
 ```
 
-- Server
+### Running Server
 
-    ```bash
-    sudo ./build/dp-tcp server -c config/server.yaml
-    ```
+```bash
+sudo ./dp-udp server -c config/server_udp.yaml
+```
 
-- Client
+### Running Client
 
-    ```bash
-    sudo ./build/dp-tcp client -c config/client.yaml
-    ```
+```bash
+sudo ./dp-udp client -c config/client_udp.yaml
+```
 
-After starting, user can used the created network interface to do your own application. But dp-tcp will not set the IP route rule. This can be customizd by your own.
+**Note**: Root privileges are required for TUN device creation and management.
+
+After starting, users can use the created network interface for their applications. The application will handle routing automatically based on the configuration.
 
 ## Quickstart
 

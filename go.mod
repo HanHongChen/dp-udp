@@ -1,10 +1,9 @@
-module github.com/Alonza0314/dp-tcp
+module github.com/HanHongChen/dp-udp
 
 go 1.24.5
 
 require (
 	github.com/Alonza0314/logger-go/v2 v2.0.3
-	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cornelk/hashmap v1.0.8
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/spf13/cobra v1.10.1

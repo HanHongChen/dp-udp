@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Alonza0314/dp-tcp/util"
+	"github.com/HanHongChen/dp-udp/util"
 )
 
 type testStruct struct {

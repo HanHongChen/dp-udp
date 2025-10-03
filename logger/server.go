@@ -1,7 +1,7 @@
 package logger
 
 import (
-	"github.com/Alonza0314/dp-tcp/constant"
+	"github.com/HanHongChen/dp-udp/constant"
 	loggergo "github.com/Alonza0314/logger-go/v2"
 	loggergoModel "github.com/Alonza0314/logger-go/v2/model"
 	loggergoUtil "github.com/Alonza0314/logger-go/v2/util"
@@ -12,8 +12,8 @@ type ServerLogger struct {
 
 	CfgLog    loggergoModel.LoggerInterface
 	ServerLog loggergoModel.LoggerInterface
-	Tcp1Log   loggergoModel.LoggerInterface
-	Tcp2Log   loggergoModel.LoggerInterface
+	Udp1Log   loggergoModel.LoggerInterface
+	Udp2Log   loggergoModel.LoggerInterface
 	TunLog    loggergoModel.LoggerInterface
 }
 
@@ -25,8 +25,8 @@ func NewServerLogger(level loggergoUtil.LogLevelString, filePath string, debugMo
 
 		CfgLog:    logger.WithTags(constant.SERVER_TAG, constant.CONFIG_TAG),
 		ServerLog: logger.WithTags(constant.SERVER_TAG, constant.SERVER_TAG),
-		Tcp1Log:   logger.WithTags(constant.SERVER_TAG, constant.TCP_1_TAG),
-		Tcp2Log:   logger.WithTags(constant.SERVER_TAG, constant.TCP_2_TAG),
+		Udp1Log:   logger.WithTags(constant.SERVER_TAG, constant.UDP_1_TAG),
+		Udp2Log:   logger.WithTags(constant.SERVER_TAG, constant.UDP_2_TAG),
 		TunLog:    logger.WithTags(constant.SERVER_TAG, constant.TUN_TAG),
 	}
 }
