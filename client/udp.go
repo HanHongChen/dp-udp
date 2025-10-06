@@ -6,31 +6,31 @@ import (
 )
 
 type udpClient struct {
-	dialAddr string
-	dialPort int
-	connAddr string
-	connPort int
-	conn     *net.UDPConn
+	bindAddr   string
+	bindPort   int
+	remoteAddr string
+	remotePort int
+	conn       *net.UDPConn
 }
 
-func newUdpClient(dialAddr string, dialPort int, connAddr string, connPort int) *udpClient {
+func newUdpClient(bindAddr string, bindPort int, remoteAddr string, remotePort int) *udpClient {
 	return &udpClient{
-		dialAddr: dialAddr,
-		dialPort: dialPort,
-		connAddr: connAddr,
-		connPort: connPort,
+		bindAddr:   bindAddr,
+		bindPort:   bindPort,
+		remoteAddr: remoteAddr,
+		remotePort: remotePort,
 	}
 }
 
 func (c *udpClient) connect() error {
-	// Resolve local address
-	localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(c.dialAddr, fmt.Sprintf("%d", c.dialPort)))
+	// Resolve local bind address
+	localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(c.bindAddr, fmt.Sprintf("%d", c.bindPort)))
 	if err != nil {
 		return err
 	}
 
 	// Resolve remote address
-	remoteAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(c.connAddr, fmt.Sprintf("%d", c.connPort)))
+	remoteAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(c.remoteAddr, fmt.Sprintf("%d", c.remotePort)))
 	if err != nil {
 		return err
 	}

@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"net"
-	"sync/atomic"
 
 	"github.com/HanHongChen/dp-udp/constant"
 	"github.com/HanHongChen/dp-udp/logger"
 	"github.com/HanHongChen/dp-udp/model"
 	"github.com/HanHongChen/dp-udp/tun"
+	"github.com/HanHongChen/dp-udp/util"
 	"github.com/cornelk/hashmap"
 	"github.com/songgao/water"
 )
@@ -24,18 +24,10 @@ type DpUdpServer struct {
 	tunnelDevice *water.Interface
 
 	readFromTun  chan []byte
-	readFromUdp1 chan UDPMessage
-	readFromUdp2 chan UDPMessage
+	readFromUdp1 chan []byte
+	readFromUdp2 chan []byte
 
 	writeToTun chan []byte
-
-	// Packet deduplication
-	deduplicator1 *model.PacketDeduplicator
-	deduplicator2 *model.PacketDeduplicator
-
-	// Sequence numbers for outgoing packets
-	seqNum1 *uint64
-	seqNum2 *uint64
 
 	// Client address mapping
 	clientAddrs1 *hashmap.Map[string, *net.UDPAddr]
@@ -43,17 +35,14 @@ type DpUdpServer struct {
 
 	packetMap *hashmap.Map[uint64, struct{}]
 
+	// Thread-safe packet Eliminator
+	packetEliminator  *model.PacketEliminator
+	packetReorderator *model.PacketReorderator
+
 	*logger.ServerLogger
 }
 
-// UDPMessage represents a UDP message with sender address
-type UDPMessage struct {
-	Data []byte
-	Addr *net.UDPAddr
-}
-
 func NewDpUdpServer(config *model.ServerConfig, serverLogger *logger.ServerLogger) *DpUdpServer {
-	var seq1, seq2 uint64
 	return &DpUdpServer{
 		udpServer1: newUdpServer(config.ServerIE.UDP1ListenAddr, config.ServerIE.UDP1ListenPort),
 		udpServer2: newUdpServer(config.ServerIE.UDP2ListenAddr, config.ServerIE.UDP2ListenPort),
@@ -63,16 +52,13 @@ func NewDpUdpServer(config *model.ServerConfig, serverLogger *logger.ServerLogge
 		tunnelRoutePrefix: config.ServerIE.TunnelDevice.RoutePrefix,
 
 		readFromTun:  make(chan []byte),
-		readFromUdp1: make(chan UDPMessage),
-		readFromUdp2: make(chan UDPMessage),
+		readFromUdp1: make(chan []byte),
+		readFromUdp2: make(chan []byte),
 
 		writeToTun: make(chan []byte),
 
-		deduplicator1: model.NewPacketDeduplicator(),
-		deduplicator2: model.NewPacketDeduplicator(),
-
-		seqNum1: &seq1,
-		seqNum2: &seq2,
+		packetEliminator:  model.NewPacketEliminator(10000),
+		packetReorderator: model.NewPacketReorderator(1000, 500),
 
 		clientAddrs1: hashmap.New[string, *net.UDPAddr](),
 		clientAddrs2: hashmap.New[string, *net.UDPAddr](),
@@ -125,8 +111,20 @@ func (s *DpUdpServer) Stop() {
 	if s.udpServer2 != nil {
 		s.udpServer2.close()
 	}
+
+	// Properly clean up tunnel device
 	if s.tunnelDevice != nil {
+		s.ServerLog.Infof("Cleaning up tunnel device...")
+
+		// First close the device file descriptor
 		s.tunnelDevice.Close()
+
+		// Then clean up the network configuration
+		if err := tun.BringDownUeTunnelDevice(s.tunnelDeviceName, s.tunnelDeviceIP, s.tunnelRoutePrefix); err != nil {
+			s.ServerLog.Errorf("Failed to bring down tunnel device: %v", err)
+		} else {
+			s.ServerLog.Infof("Tunnel device cleaned up successfully")
+		}
 	}
 
 	s.ServerLog.Infof("DpUdpServer stopped")
@@ -141,6 +139,7 @@ func (s *DpUdpServer) initTunnelDevice() error {
 	return nil
 }
 
+// Read packets from the tunnel device and forward to UDP connections
 func (s *DpUdpServer) readFromTunnelDevice(ctx context.Context) {
 	for {
 		select {
@@ -154,15 +153,19 @@ func (s *DpUdpServer) readFromTunnelDevice(ctx context.Context) {
 				continue
 			}
 
-			// Create a properly sized buffer
 			data := make([]byte, n)
 			copy(data, buffer[:n])
+			if !util.IsValidIPPacket(data) {
+				s.ServerLog.Infof("Invalid IP packet read from TUN device, skipping (size: %d)", len(data))
+				continue
+			}
 
 			s.readFromTun <- data
 		}
 	}
 }
 
+// Read from udp server 1 and forward to tunnel device
 func (s *DpUdpServer) readFromUdp1Connection(ctx context.Context) {
 	for {
 		select {
@@ -176,32 +179,19 @@ func (s *DpUdpServer) readFromUdp1Connection(ctx context.Context) {
 				continue
 			}
 
-			// Parse iperf3 UDP packet
-			var packet model.UDPPacket
-			if err := packet.Unmarshal(buffer[:n]); err != nil {
-				s.ServerLog.Errorf("Failed to parse UDP packet from connection 1: %v", err)
+			// Receive raw IP packet directly
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+			if !util.IsValidIPPacket(data) {
+				s.ServerLog.Debugf("Invalid IP packet read from UDP conn 1, skipping (size: %d)", len(data))
 				continue
 			}
-
+			// s.ServerLog.Debugf("UDP1 received %d bytes from %s: %x", len(data), addr.String(), data)
 			// Store client address for response routing
 			clientKey := addr.String()
 			s.clientAddrs1.Set(clientKey, addr)
+			s.readFromUdp1 <- data
 
-			// Process packet for deduplication
-			shouldProcess, stats := s.deduplicator1.ProcessPacket(packet.Header.SeqNum)
-
-			if stats.IsDuplicate {
-				s.ServerLog.Debugf("Duplicate packet on UDP1, seq=%d from %s", packet.Header.SeqNum, addr)
-				continue
-			}
-
-			if stats.IsOutOfOrder {
-				s.ServerLog.Debugf("Out-of-order packet on UDP1, seq=%d, expected>%d from %s", packet.Header.SeqNum, stats.MaxSeqNum, addr)
-			}
-
-			if shouldProcess {
-				s.readFromUdp1 <- UDPMessage{Data: packet.Payload, Addr: addr}
-			}
 		}
 	}
 }
@@ -219,32 +209,19 @@ func (s *DpUdpServer) readFromUdp2Connection(ctx context.Context) {
 				continue
 			}
 
-			// Parse iperf3 UDP packet
-			var packet model.UDPPacket
-			if err := packet.Unmarshal(buffer[:n]); err != nil {
-				s.ServerLog.Errorf("Failed to parse UDP packet from connection 2: %v", err)
+			// Receive raw IP packet directly
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+			if !util.IsValidIPPacket(data) {
+				s.ServerLog.Debugf("Invalid IP packet read from UDP conn 2, skipping (size: %d)", len(data))
 				continue
 			}
-
+			// s.ServerLog.Debugf("UDP2 received %d bytes from %s: %x", len(data), addr.String(), data)
 			// Store client address for response routing
 			clientKey := addr.String()
 			s.clientAddrs2.Set(clientKey, addr)
+			s.readFromUdp2 <- data
 
-			// Process packet for deduplication
-			shouldProcess, stats := s.deduplicator2.ProcessPacket(packet.Header.SeqNum)
-
-			if stats.IsDuplicate {
-				s.ServerLog.Debugf("Duplicate packet on UDP2, seq=%d from %s", packet.Header.SeqNum, addr)
-				continue
-			}
-
-			if stats.IsOutOfOrder {
-				s.ServerLog.Debugf("Out-of-order packet on UDP2, seq=%d, expected>%d from %s", packet.Header.SeqNum, stats.MaxSeqNum, addr)
-			}
-
-			if shouldProcess {
-				s.readFromUdp2 <- UDPMessage{Data: packet.Payload, Addr: addr}
-			}
 		}
 	}
 }
@@ -255,21 +232,118 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case data := <-s.writeToTun:
+			if !util.IsValidIPPacket(data) {
+				s.ServerLog.Debugf("Invalid IP packet from writeToTun channel, skipping")
+				continue
+			}
 			if _, err := s.tunnelDevice.Write(data); err != nil {
 				s.ServerLog.Errorf("Write to tunnel device failed: %v", err)
 			}
-		case msg := <-s.readFromUdp1:
-			if _, err := s.tunnelDevice.Write(msg.Data); err != nil {
-				s.ServerLog.Errorf("Write UDP1 data to tunnel device failed: %v", err)
+		case data := <-s.readFromUdp1:
+			s.ServerLog.Debugf("Writing %d bytes to TUN from UDP1", len(data))
+
+			// // 印出整個封包內容
+			// s.ServerLog.Infof("=== UDP1 PACKET ANALYSIS ===")
+			// s.ServerLog.Infof("Packet size: %d bytes", len(data))
+			// s.ServerLog.Infof("Raw hex: %x", data)
+
+			// if len(data) >= 20 {
+			// 	version := data[0] >> 4
+			// 	ihl := (data[0] & 0x0F) * 4
+			// 	protocol := data[9]
+			// 	srcIP := fmt.Sprintf("%d.%d.%d.%d", data[12], data[13], data[14], data[15])
+			// 	dstIP := fmt.Sprintf("%d.%d.%d.%d", data[16], data[17], data[18], data[19])
+
+			// 	s.ServerLog.Infof("IP: Version=%d, IHL=%d, Protocol=%d", version, ihl, protocol)
+			// 	s.ServerLog.Infof("IP: %s -> %s", srcIP, dstIP)
+
+			// 	if protocol == 6 {
+			// 		s.ServerLog.Infof("*** This is TCP packet ***")
+			// 	} else if protocol == 17 {
+			// 		s.ServerLog.Infof("*** This is UDP packet ***")
+			// 		if len(data) >= int(ihl)+4 {
+			// 			srcPort := uint16(data[ihl])<<8 | uint16(data[ihl+1])
+			// 			dstPort := uint16(data[ihl+2])<<8 | uint16(data[ihl+3])
+			// 			s.ServerLog.Infof("UDP: %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
+			// 		}
+			// 	} else {
+			// 		s.ServerLog.Infof("*** Protocol %d ***", protocol)
+			// 	}
+			// }
+			// s.ServerLog.Infof("============================")
+
+			seq, err := util.ExtractIperf3SeqNum(data)
+			if err != nil {
+				s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP1 data: %v", err)
+			} else {
+				s.ServerLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
 			}
-		case msg := <-s.readFromUdp2:
-			if _, err := s.tunnelDevice.Write(msg.Data); err != nil {
-				s.ServerLog.Errorf("Write UDP2 data to tunnel device failed: %v", err)
+
+			if s.packetEliminator.CheckAndMark(seq) {
+				s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+				continue
+			}
+
+			s.packetReorderator.AddPacket(seq, data)
+
+		case data := <-s.readFromUdp2:
+			s.ServerLog.Debugf("Writing %d bytes to TUN from UDP2", len(data))
+
+			// // 印出整個封包內容
+			// s.ServerLog.Infof("=== UDP1 PACKET ANALYSIS ===")
+			// s.ServerLog.Infof("Packet size: %d bytes", len(data))
+			// s.ServerLog.Infof("Raw hex: %x", data)
+
+			// if len(data) >= 20 {
+			// 	version := data[0] >> 4
+			// 	ihl := (data[0] & 0x0F) * 4
+			// 	protocol := data[9]
+			// 	srcIP := fmt.Sprintf("%d.%d.%d.%d", data[12], data[13], data[14], data[15])
+			// 	dstIP := fmt.Sprintf("%d.%d.%d.%d", data[16], data[17], data[18], data[19])
+
+			// 	s.ServerLog.Infof("IP: Version=%d, IHL=%d, Protocol=%d", version, ihl, protocol)
+			// 	s.ServerLog.Infof("IP: %s -> %s", srcIP, dstIP)
+
+			// 	if protocol == 6 {
+			// 		s.ServerLog.Infof("*** This is TCP packet ***")
+			// 	} else if protocol == 17 {
+			// 		s.ServerLog.Infof("*** This is UDP packet ***")
+			// 		if len(data) >= int(ihl)+4 {
+			// 			srcPort := uint16(data[ihl])<<8 | uint16(data[ihl+1])
+			// 			dstPort := uint16(data[ihl+2])<<8 | uint16(data[ihl+3])
+			// 			s.ServerLog.Infof("UDP: %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
+			// 		}
+			// 	} else {
+			// 		s.ServerLog.Infof("*** Protocol %d ***", protocol)
+			// 	}
+			// }
+			// s.ServerLog.Infof("============================")
+
+			seq, err := util.ExtractIperf3SeqNum(data)
+			if err != nil {
+				s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP2 data: %v", err)
+			} else {
+				s.ServerLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
+			}
+
+			if s.packetEliminator.CheckAndMark(seq) {
+				s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+				continue
+			}
+
+			s.packetReorderator.AddPacket(seq, data)
+
+		case readyPackets := <-s.packetReorderator.GetReadyChan():
+			for _, packet := range readyPackets {
+				if _, err := s.tunnelDevice.Write(packet); err != nil {
+					s.ServerLog.Errorf("Write readyPackets to tunnel failed: %v", err)
+				}
 			}
 		}
 	}
 }
 
+// Dispatch packets read from tunnel device to all connected UDP clients
 func (s *DpUdpServer) dispatchFromTunnel(ctx context.Context) {
 	for {
 		select {
@@ -277,36 +351,23 @@ func (s *DpUdpServer) dispatchFromTunnel(ctx context.Context) {
 			return
 		case data := <-s.readFromTun:
 			// Dispatch to all connected clients on both UDP connections
-			go s.broadcastToUdp1Clients(data)
-			go s.broadcastToUdp2Clients(data)
+			go func() {
+				s.clientAddrs1.Range(func(key string, addr *net.UDPAddr) bool {
+					if err := s.udpServer1.write(data, addr); err != nil {
+						s.ServerLog.Errorf("UDP 1 server write to %s failed: %v", addr, err)
+					}
+					return true
+				})
+			}()
+
+			go func() {
+				s.clientAddrs2.Range(func(key string, addr *net.UDPAddr) bool {
+					if err := s.udpServer2.write(data, addr); err != nil {
+						s.ServerLog.Errorf("UDP 2 server write to %s failed: %v", addr, err)
+					}
+					return true
+				})
+			}()
 		}
 	}
-}
-
-func (s *DpUdpServer) broadcastToUdp1Clients(data []byte) {
-	seq := atomic.AddUint64(s.seqNum1, 1)
-	packet := model.NewUDPPacketDefault(seq, data) // Use standard iperf3 32-bit format
-	packetBytes := packet.Marshal()
-
-	// Send to all connected clients on UDP1
-	s.clientAddrs1.Range(func(key string, addr *net.UDPAddr) bool {
-		if err := s.udpServer1.write(packetBytes, addr); err != nil {
-			s.ServerLog.Errorf("UDP 1 server write to %s failed: %v", addr, err)
-		}
-		return true
-	})
-}
-
-func (s *DpUdpServer) broadcastToUdp2Clients(data []byte) {
-	seq := atomic.AddUint64(s.seqNum2, 1)
-	packet := model.NewUDPPacketDefault(seq, data) // Use standard iperf3 32-bit format
-	packetBytes := packet.Marshal()
-
-	// Send to all connected clients on UDP2
-	s.clientAddrs2.Range(func(key string, addr *net.UDPAddr) bool {
-		if err := s.udpServer2.write(packetBytes, addr); err != nil {
-			s.ServerLog.Errorf("UDP 2 server write to %s failed: %v", addr, err)
-		}
-		return true
-	})
 }

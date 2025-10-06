@@ -3,7 +3,7 @@
 default: build
 
 build:
-	go build -o build/dp-tcp main.go
+	go build -o build/dp-udp main.go
 
 test:
 	go test -v ./...

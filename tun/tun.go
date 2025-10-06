@@ -44,23 +44,30 @@ func BringUpUeTunnelDevice(ueTunnelDeviceName string, ip string, routePrefix str
 	if err != nil {
 		return nil, fmt.Errorf("error creating tunnel device: %v", err)
 	}
+	
+	// Check if the device was actually created
+	fmt.Printf("TUN device created with name: %s\n", tun.Name())
 	route, err := deriveCIDR(ip, routePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("error deriveCIDR: %v", err)
 	}
 	// return nil, fmt.Errorf("%s, tun", route)
+	// Use the actual device name from the created TUN interface
+	actualDevName := tun.Name()
 	cmds := [][]string{
-		{"ip", "addr", "add", fmt.Sprintf("%s/32", ip), "dev", ueTunnelDeviceName},
-		{"ip", "link", "set", "dev", ueTunnelDeviceName, "up"},
+		{"ip", "addr", "add", fmt.Sprintf("%s/32", ip), "dev", actualDevName},
+		{"ip", "link", "set", "dev", actualDevName, "up"},
 		// {"ip", "route", "add", "default", "via", ip},
-		{"ip", "route", "add", fmt.Sprintf("%s/%s", route, routePrefix), "dev", ueTunnelDeviceName},
+		{"ip", "route", "add", fmt.Sprintf("%s/%s", route, routePrefix), "dev", actualDevName},
 	}
 
 	for i, cmd := range cmds {
-		fmt.Errorf("now i = : %d", i)
-		if err := exec.Command(cmd[0], cmd[1:]...).Run(); err != nil {
-			return nil, fmt.Errorf("error bringing up tunnel device: %v", err)
+		fmt.Printf("Executing command %d: %v\n", i, cmd)
+		output, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("error executing command %v: %v, output: %s", cmd, err, string(output))
 		}
+		fmt.Printf("Command %d completed successfully\n", i)
 	}
 
 	return tun, nil
@@ -77,9 +84,15 @@ func BringDownUeTunnelDevice(ueTunnelDeviceName string, ip string, routePrefix s
 		{"ip", "link", "set", "dev", ueTunnelDeviceName, "down"},
 	}
 
-	for _, cmd := range cmds {
-		if err := exec.Command(cmd[0], cmd[1:]...).Run(); err != nil {
-			return fmt.Errorf("error bringing down tunnel device: %v", err)
+	for i, cmd := range cmds {
+		fmt.Printf("Cleanup command %d: %v\n", i, cmd)
+		output, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+		if err != nil {
+			// Some cleanup commands might fail if the device/route doesn't exist
+			// Log the error but continue with other cleanup commands
+			fmt.Printf("Cleanup command %d failed (continuing): %v, output: %s\n", i, err, string(output))
+		} else {
+			fmt.Printf("Cleanup command %d completed successfully\n", i)
 		}
 	}
 
