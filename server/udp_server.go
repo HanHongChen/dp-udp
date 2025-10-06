@@ -156,7 +156,7 @@ func (s *DpUdpServer) readFromTunnelDevice(ctx context.Context) {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			if !util.IsValidIPPacket(data) {
-				s.ServerLog.Infof("Invalid IP packet read from TUN device, skipping (size: %d)", len(data))
+				s.ServerLog.Debugf("Invalid IP packet read from TUN device, skipping (size: %d)", len(data))
 				continue
 			}
 
@@ -272,20 +272,22 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 			// }
 			// s.ServerLog.Infof("============================")
 
-			seq, err := util.ExtractIperf3SeqNum(data)
-			if err != nil {
-				s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP1 data: %v", err)
-			} else {
-				s.ServerLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+			// seq, err := util.ExtractIperf3SeqNum(data)
+			// if err != nil {
+			// 	s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP1 data: %v", err)
+			// } else {
+			// 	s.ServerLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+			// }
+
+			// if s.packetEliminator.CheckAndMark(seq) {
+			// 	s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 	continue
+			// }
+
+			// s.packetReorderator.AddPacket(seq, data)
+			if _, err := s.tunnelDevice.Write(data); err != nil {
+				s.ServerLog.Errorf("Write UDP1 data to tunnel device failed: %v", err)
 			}
-
-			if s.packetEliminator.CheckAndMark(seq) {
-				s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-				continue
-			}
-
-			s.packetReorderator.AddPacket(seq, data)
-
 		case data := <-s.readFromUdp2:
 			s.ServerLog.Debugf("Writing %d bytes to TUN from UDP2", len(data))
 
@@ -326,19 +328,23 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 				s.ServerLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
 			}
 
-			if s.packetEliminator.CheckAndMark(seq) {
-				s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-				continue
+			// if s.packetEliminator.CheckAndMark(seq) {
+			// 	s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 	continue
+			// }
+
+			// s.packetReorderator.AddPacket(seq, data)
+			if _, err := s.tunnelDevice.Write(data); err != nil {
+				s.ServerLog.Errorf("Write UDP2 data to tunnel device failed: %v", err)
 			}
 
-			s.packetReorderator.AddPacket(seq, data)
+			// case readyPackets := <-s.packetReorderator.GetReadyChan():
+			// 	for _, packet := range readyPackets {
+			// 		if _, err := s.tunnelDevice.Write(packet); err != nil {
+			// 			s.ServerLog.Errorf("Write readyPackets to tunnel failed: %v", err)
+			// 		}
+			// 	}
 
-		case readyPackets := <-s.packetReorderator.GetReadyChan():
-			for _, packet := range readyPackets {
-				if _, err := s.tunnelDevice.Write(packet); err != nil {
-					s.ServerLog.Errorf("Write readyPackets to tunnel failed: %v", err)
-				}
-			}
 		}
 	}
 }
