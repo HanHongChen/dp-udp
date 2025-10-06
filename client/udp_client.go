@@ -255,17 +255,36 @@ func (c *DpUdpClient) writeToTunnelDevice(ctx context.Context) {
 			}
 		case data := <-c.readFromUdp1:
 			c.ClientLog.Debugf("Writing %d bytes to TUN from UDP1", len(data))
-			seq, err := util.ExtractIperf3SeqNum(data)
-			if err != nil {
-				c.ClientLog.Debugf("Could not extract iperf3 seq num from UDP1 data: %v", err)
-			} else {
-				c.ClientLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
-			}
-
-			// if c.packetEliminator.CheckAndMark(seq) {
-			// 	c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-			// 	continue
+			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
+			// if err != nil {
+			// 	c.ClientLog.Warnf("AnalyzePacket error: %v", err)
 			// }
+
+			// if isTcp || isUdp || seq == 0 {
+			// 	c.ClientLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
+			// } else {
+			// 	c.ClientLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+			// 	if c.packetEliminator.CheckAndMark(seq) {
+			// 		c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 		continue
+			// 	}
+			// }
+			if util.IsTCPPacket(data) {
+				c.ClientLog.Debugf("Skipping TCP packet from UDP1 (likely iperf3 control)")
+				// continue
+			} else {
+				seq, err := util.ExtractIperf3SeqNum(data)
+				if err != nil {
+					c.ClientLog.Warnf("Could not extract iperf3 seq num from UDP1 data: %v", err)
+				} else {
+					c.ClientLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+				}
+
+				if c.packetEliminator.CheckAndMark(seq) {
+					c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+					continue
+				}
+			}
 
 			// c.packetReorderator.AddPacket(seq, data)
 
@@ -274,19 +293,39 @@ func (c *DpUdpClient) writeToTunnelDevice(ctx context.Context) {
 			}
 		case data := <-c.readFromUdp2:
 			c.ClientLog.Debugf("Writing %d bytes to TUN from UDP2", len(data))
-			seq, err := util.ExtractIperf3SeqNum(data)
-			if err != nil {
-				c.ClientLog.Debugf("Could not extract iperf3 seq num from UDP2 data: %v", err)
-			} else {
-				c.ClientLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
-			}
-
-			// if c.packetEliminator.CheckAndMark(seq) {
-			// 	c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-			// 	continue
+			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
+			// if err != nil {
+			// 	c.ClientLog.Warnf("AnalyzePacket error: %v", err)
 			// }
 
-			// c.packetReorderator.AddPacket(seq, data)
+			// if isTcp || isUdp || seq == 0 {
+			// 	c.ClientLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
+			// } else {
+			// 	c.ClientLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
+			// 	if c.packetEliminator.CheckAndMark(seq) {
+			// 		c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 		continue
+			// 	}
+			// }
+			if util.IsTCPPacket(data) {
+				c.ClientLog.Debugf("TCP packet from UDP2 (likely iperf3 control)")
+				// continue
+			} else {
+				seq, err := util.ExtractIperf3SeqNum(data)
+				if err != nil {
+					c.ClientLog.Warnf("Could not extract iperf3 seq num from UDP2 data: %v", err)
+				} else {
+					c.ClientLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
+				}
+
+				if c.packetEliminator.CheckAndMark(seq) {
+					c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+					continue
+				}
+
+				// c.packetReorderator.AddPacket(seq, data)
+
+			}
 
 			if _, err := c.tunnelDevice.Write(data); err != nil {
 				c.ClientLog.Errorf("Write UDP2 data to tunnel device failed: %v", err)

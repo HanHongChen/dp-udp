@@ -241,55 +241,78 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 			}
 		case data := <-s.readFromUdp1:
 			s.ServerLog.Debugf("Writing %d bytes to TUN from UDP1", len(data))
-
-			// // 印出整個封包內容
-			// s.ServerLog.Infof("=== UDP1 PACKET ANALYSIS ===")
-			// s.ServerLog.Infof("Packet size: %d bytes", len(data))
-			// s.ServerLog.Infof("Raw hex: %x", data)
-
-			// if len(data) >= 20 {
-			// 	version := data[0] >> 4
-			// 	ihl := (data[0] & 0x0F) * 4
-			// 	protocol := data[9]
-			// 	srcIP := fmt.Sprintf("%d.%d.%d.%d", data[12], data[13], data[14], data[15])
-			// 	dstIP := fmt.Sprintf("%d.%d.%d.%d", data[16], data[17], data[18], data[19])
-
-			// 	s.ServerLog.Infof("IP: Version=%d, IHL=%d, Protocol=%d", version, ihl, protocol)
-			// 	s.ServerLog.Infof("IP: %s -> %s", srcIP, dstIP)
-
-			// 	if protocol == 6 {
-			// 		s.ServerLog.Infof("*** This is TCP packet ***")
-			// 	} else if protocol == 17 {
-			// 		s.ServerLog.Infof("*** This is UDP packet ***")
-			// 		if len(data) >= int(ihl)+4 {
-			// 			srcPort := uint16(data[ihl])<<8 | uint16(data[ihl+1])
-			// 			dstPort := uint16(data[ihl+2])<<8 | uint16(data[ihl+3])
-			// 			s.ServerLog.Infof("UDP: %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
-			// 		}
-			// 	} else {
-			// 		s.ServerLog.Infof("*** Protocol %d ***", protocol)
-			// 	}
-			// }
-			// s.ServerLog.Infof("============================")
-
-			// seq, err := util.ExtractIperf3SeqNum(data)
+			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
 			// if err != nil {
-			// 	s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP1 data: %v", err)
+			// 	s.ServerLog.Warnf("AnalyzePacket error: %v", err)
+			// }
+
+			// if isTcp || isUdp || seq == 0 {
+			// 	s.ServerLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
 			// } else {
 			// 	s.ServerLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+			// 	if s.packetEliminator.CheckAndMark(seq) {
+			// 		s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 		continue
+			// 	}
 			// }
+			if util.IsTCPPacket(data) {
+				s.ServerLog.Debugf("Skipping TCP packet from UDP1 (likely iperf3 control)")
+			} else {
+				seq, err := util.ExtractIperf3SeqNum(data)
+				if err != nil {
+					s.ServerLog.Warnf("Could not extract iperf3 seq num from UDP1 data: %v", err)
+				} else {
+					s.ServerLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+				}
 
-			// if s.packetEliminator.CheckAndMark(seq) {
-			// 	s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-			// 	continue
-			// }
+				if s.packetEliminator.CheckAndMark(seq) {
+					s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+					continue
+				}
 
-			// s.packetReorderator.AddPacket(seq, data)
+				// s.packetReorderator.AddPacket(seq, data)
+
+			}
+
 			if _, err := s.tunnelDevice.Write(data); err != nil {
 				s.ServerLog.Errorf("Write UDP1 data to tunnel device failed: %v", err)
 			}
 		case data := <-s.readFromUdp2:
 			s.ServerLog.Debugf("Writing %d bytes to TUN from UDP2", len(data))
+			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
+			// if err != nil {
+			// 	s.ServerLog.Warnf("AnalyzePacket error: %v", err)
+			// 	return
+			// }
+
+			// if isTcp || isUdp || seq == 0 {
+			// 	s.ServerLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
+			// } else {
+			// 	s.ServerLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
+			// 	if s.packetEliminator.CheckAndMark(seq) {
+			// 		s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 		continue
+			// 	}
+			// }
+			if util.IsTCPPacket(data) {
+				s.ServerLog.Debugf("Skipping TCP packet from UDP2 (likely iperf3 control)")
+				// continue
+			} else {
+				seq, err := util.ExtractIperf3SeqNum(data)
+				if err != nil {
+					s.ServerLog.Warnf("Could not extract iperf3 seq num from UDP2 data: %v", err)
+				} else {
+					s.ServerLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
+				}
+
+				if s.packetEliminator.CheckAndMark(seq) {
+					s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+					continue
+				}
+
+				// s.packetReorderator.AddPacket(seq, data)
+
+			}
 
 			// // 印出整個封包內容
 			// s.ServerLog.Infof("=== UDP1 PACKET ANALYSIS ===")
@@ -321,19 +344,6 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 			// }
 			// s.ServerLog.Infof("============================")
 
-			seq, err := util.ExtractIperf3SeqNum(data)
-			if err != nil {
-				s.ServerLog.Debugf("Could not extract iperf3 seq num from UDP2 data: %v", err)
-			} else {
-				s.ServerLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
-			}
-
-			// if s.packetEliminator.CheckAndMark(seq) {
-			// 	s.ServerLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-			// 	continue
-			// }
-
-			// s.packetReorderator.AddPacket(seq, data)
 			if _, err := s.tunnelDevice.Write(data); err != nil {
 				s.ServerLog.Errorf("Write UDP2 data to tunnel device failed: %v", err)
 			}
