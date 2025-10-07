@@ -29,6 +29,11 @@ func (pr *PacketReorderator) AddPacket(seqNum uint64, data []byte) {
 	pr.mutex.Lock()
 	defer pr.mutex.Unlock()
 
+	if len(pr.buffer) == 0 && pr.expectedSeq == 1 {
+		fmt.Printf("PacketReorderator: initializing expectedSeq to %d\n", seqNum)
+		pr.expectedSeq = seqNum
+	}
+
 	if seqNum == pr.expectedSeq {
 		// it is the expected packet, handle immediately
 		readyPackets := [][]byte{data}
