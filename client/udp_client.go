@@ -51,7 +51,7 @@ func NewDpUdpClient(config *model.ClientConfig, clientLogger *logger.ClientLogge
 
 		writeToTun: make(chan []byte),
 
-		packetEliminator:  model.NewPacketEliminator(10000),
+		packetEliminator:  model.NewPacketEliminator(10),
 		packetReorderator: model.NewPacketReorderator(1000, 500),
 
 		packetMap: hashmap.New[uint64, struct{}](),
@@ -152,39 +152,6 @@ func (c *DpUdpClient) readFromTunnelDevice(ctx context.Context) {
 				continue
 			}
 
-			// // 分析封包內容
-			// if len(data) >= 20 {
-			// 	protocol := data[9]
-			// 	srcIP := fmt.Sprintf("%d.%d.%d.%d", data[12], data[13], data[14], data[15])
-			// 	dstIP := fmt.Sprintf("%d.%d.%d.%d", data[16], data[17], data[18], data[19])
-
-			// 	c.ClientLog.Infof("=== TUN READ PACKET ===")
-			// 	c.ClientLog.Infof("Size: %d bytes", len(data))
-			// 	c.ClientLog.Infof("Protocol: %d", protocol)
-			// 	c.ClientLog.Infof("%s -> %s", srcIP, dstIP)
-
-			// 	if protocol == 6 {
-			// 		c.ClientLog.Infof("*** SENDING TCP PACKET ***")
-			// 		if len(data) >= 24 {
-			// 			ihl := int(data[0]&0x0F) * 4
-			// 			srcPort := uint16(data[ihl])<<8 | uint16(data[ihl+1])
-			// 			dstPort := uint16(data[ihl+2])<<8 | uint16(data[ihl+3])
-			// 			c.ClientLog.Infof("TCP: %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
-			// 		}
-			// 	} else if protocol == 17 {
-			// 		c.ClientLog.Infof("*** SENDING UDP PACKET ***")
-			// 		if len(data) >= 24 {
-			// 			ihl := int(data[0]&0x0F) * 4
-			// 			srcPort := uint16(data[ihl])<<8 | uint16(data[ihl+1])
-			// 			dstPort := uint16(data[ihl+2])<<8 | uint16(data[ihl+3])
-			// 			c.ClientLog.Infof("UDP: %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
-			// 		}
-			// 	} else {
-			// 		c.ClientLog.Infof("*** OTHER PROTOCOL: %d ***", protocol)
-			// 	}
-			// 	c.ClientLog.Infof("=======================")
-			// }
-
 			c.readFromTun <- data
 		}
 	}
@@ -255,23 +222,25 @@ func (c *DpUdpClient) writeToTunnelDevice(ctx context.Context) {
 			}
 		case data := <-c.readFromUdp1:
 			c.ClientLog.Debugf("Writing %d bytes to TUN from UDP1", len(data))
-			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
+			// isTcp, skipElimination, seq, err := util.AnalyzePacket(data)
 			// if err != nil {
 			// 	c.ClientLog.Warnf("AnalyzePacket error: %v", err)
+			// 	continue
 			// }
 
-			// if isTcp || isUdp || seq == 0 {
-			// 	c.ClientLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
+			// if isTcp {
+			// 	c.ClientLog.Debugf("AnalyzePacket result - isTcp: %v, skipElimination: %v, seq: %d", isTcp, skipElimination, seq)
+			// } else if skipElimination {
+			// 	c.ClientLog.Warnf("skipElimination is true, but no reason given")
 			// } else {
-			// 	c.ClientLog.Debugf("Extracted iperf3 seq num from UDP1 data: %d", seq)
+			// 	c.ClientLog.Infof("Extracted iperf3 seq num from UDP1 data: %d", seq)
 			// 	if c.packetEliminator.CheckAndMark(seq) {
-			// 		c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
+			// 		c.ClientLog.Infof("Packet seq %d eliminated as duplicate", seq)
 			// 		continue
 			// 	}
 			// }
 			if util.IsTCPPacket(data) {
 				c.ClientLog.Debugf("Skipping TCP packet from UDP1 (likely iperf3 control)")
-				// continue
 			} else {
 				seq, err := util.ExtractIperf3SeqNum(data)
 				if err != nil {
@@ -284,32 +253,17 @@ func (c *DpUdpClient) writeToTunnelDevice(ctx context.Context) {
 					c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
 					continue
 				}
+				c.packetReorderator.AddPacket(seq, data)
+				continue
 			}
-
-			// c.packetReorderator.AddPacket(seq, data)
 
 			if _, err := c.tunnelDevice.Write(data); err != nil {
 				c.ClientLog.Errorf("Write UDP1 data to tunnel device failed: %v", err)
 			}
 		case data := <-c.readFromUdp2:
 			c.ClientLog.Debugf("Writing %d bytes to TUN from UDP2", len(data))
-			// isTcp, isUdp, seq, err := util.AnalyzePacket(data)
-			// if err != nil {
-			// 	c.ClientLog.Warnf("AnalyzePacket error: %v", err)
-			// }
-
-			// if isTcp || isUdp || seq == 0 {
-			// 	c.ClientLog.Debugf("AnalyzePacket result - isTcp: %v, isUdp: %v, seq: %d", isTcp, isUdp, seq)
-			// } else {
-			// 	c.ClientLog.Debugf("Extracted iperf3 seq num from UDP2 data: %d", seq)
-			// 	if c.packetEliminator.CheckAndMark(seq) {
-			// 		c.ClientLog.Debugf("Packet seq %d eliminated as duplicate", seq)
-			// 		continue
-			// 	}
-			// }
 			if util.IsTCPPacket(data) {
 				c.ClientLog.Debugf("TCP packet from UDP2 (likely iperf3 control)")
-				// continue
 			} else {
 				seq, err := util.ExtractIperf3SeqNum(data)
 				if err != nil {
@@ -323,19 +277,20 @@ func (c *DpUdpClient) writeToTunnelDevice(ctx context.Context) {
 					continue
 				}
 
-				// c.packetReorderator.AddPacket(seq, data)
-
+				c.packetReorderator.AddPacket(seq, data)
+				continue
 			}
 
 			if _, err := c.tunnelDevice.Write(data); err != nil {
 				c.ClientLog.Errorf("Write UDP2 data to tunnel device failed: %v", err)
 			}
-			// case readyPackets := <-c.packetReorderator.GetReadyChan():
-			// 	for _, packet := range readyPackets {
-			// 		if _, err := c.tunnelDevice.Write(packet); err != nil {
-			// 			c.ClientLog.Errorf("Write readyPackets to tunnel failed: %v", err)
-			// 		}
-			// 	}
+		case readyPackets := <-c.packetReorderator.GetReadyChan():
+			c.ClientLog.Warnf("Writing %d reordered packets to TUN", len(readyPackets))
+			for _, packet := range readyPackets {
+				if _, err := c.tunnelDevice.Write(packet); err != nil {
+					c.ClientLog.Errorf("Write readyPackets to tunnel failed: %v", err)
+				}
+			}
 		}
 
 	}

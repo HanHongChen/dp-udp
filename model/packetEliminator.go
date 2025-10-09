@@ -40,7 +40,7 @@ func (pe *PacketEliminator) CheckAndMark(seqNum uint64) bool {
 }
 
 func (pe *PacketEliminator) cleanup() {
-	expireTime := time.Now().Add(-30 * time.Second)
+	expireTime := time.Now().Add(-10 * time.Millisecond)
 	cleanedCount := 0
 
 	for seqNum, timestamp := range pe.seenPackets {

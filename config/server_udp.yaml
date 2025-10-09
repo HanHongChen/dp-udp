@@ -10,4 +10,4 @@ server:
     route_prefix: 16
 
 logger:
-  level: debug
+  level: info
