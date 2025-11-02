@@ -22,6 +22,11 @@ func newUdpClient(bindAddr string, bindPort int, remoteAddr string, remotePort i
 	}
 }
 
+// func tuneUDP(c *net.UDPConn) {
+// 	c.SetReadBuffer(16 << 20) // 16 MiB
+// 	c.SetWriteBuffer(16 << 20)
+// }
+
 func (c *udpClient) connect() error {
 	// Resolve local bind address
 	localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(c.bindAddr, fmt.Sprintf("%d", c.bindPort)))
@@ -42,6 +47,7 @@ func (c *udpClient) connect() error {
 	}
 
 	c.conn = conn
+	// tuneUDP(c.conn)
 	return nil
 }
 

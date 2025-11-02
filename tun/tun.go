@@ -2,10 +2,9 @@ package tun
 
 import (
 	"fmt"
-	"os/exec"
 	"net"
+	"os/exec"
 	"strconv"
-
 
 	"github.com/songgao/water"
 )
@@ -20,9 +19,9 @@ func deriveCIDR(ipStr string, prefix string) (string, error) {
 		return "", fmt.Errorf("not an IPv4 address: %s", ipStr)
 	}
 	prefixInt, err := strconv.Atoi(prefix)
-    if err != nil {
-        return "", fmt.Errorf("invalid prefix (not a number): %s", prefix)
-    }
+	if err != nil {
+		return "", fmt.Errorf("invalid prefix (not a number): %s", prefix)
+	}
 
 	mask := net.CIDRMask(prefixInt, 32)
 	network := ip4.Mask(mask)
@@ -44,7 +43,7 @@ func BringUpUeTunnelDevice(ueTunnelDeviceName string, ip string, routePrefix str
 	if err != nil {
 		return nil, fmt.Errorf("error creating tunnel device: %v", err)
 	}
-	
+
 	// Check if the device was actually created
 	fmt.Printf("TUN device created with name: %s\n", tun.Name())
 	route, err := deriveCIDR(ip, routePrefix)
@@ -57,7 +56,8 @@ func BringUpUeTunnelDevice(ueTunnelDeviceName string, ip string, routePrefix str
 	cmds := [][]string{
 		{"ip", "addr", "add", fmt.Sprintf("%s/32", ip), "dev", actualDevName},
 		{"ip", "link", "set", "dev", actualDevName, "up"},
-		// {"ip", "route", "add", "default", "via", ip},
+		{"ip", "link", "set", "dev", actualDevName, "txqueuelen", "10000"},
+		{"ip", "link", "set", "dev", actualDevName, "mtu", "1300"},
 		{"ip", "route", "add", fmt.Sprintf("%s/%s", route, routePrefix), "dev", actualDevName},
 	}
 

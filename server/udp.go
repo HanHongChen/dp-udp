@@ -18,6 +18,11 @@ func newUdpServer(listenAddr string, listenPort int) *udpServer {
 	}
 }
 
+// func tuneUDP(c *net.UDPConn) {
+// 	c.SetReadBuffer(16 << 20) // 16 MiB
+// 	c.SetWriteBuffer(16 << 20)
+// }
+
 func (s *udpServer) listen() error {
 	addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(s.listenAddr, fmt.Sprintf("%d", s.listenPort)))
 	if err != nil {
@@ -30,6 +35,7 @@ func (s *udpServer) listen() error {
 	}
 
 	s.conn = conn
+	// tuneUDP(s.conn)
 	return nil
 }
 
