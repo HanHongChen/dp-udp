@@ -57,7 +57,7 @@ func BringUpUeTunnelDevice(ueTunnelDeviceName string, ip string, routePrefix str
 		{"ip", "addr", "add", fmt.Sprintf("%s/32", ip), "dev", actualDevName},
 		{"ip", "link", "set", "dev", actualDevName, "up"},
 		{"ip", "link", "set", "dev", actualDevName, "txqueuelen", "10000"},
-		{"ip", "link", "set", "dev", actualDevName, "mtu", "1300"},
+		{"ip", "link", "set", "dev", actualDevName, "mtu", "1425"},
 		{"ip", "route", "add", fmt.Sprintf("%s/%s", route, routePrefix), "dev", actualDevName},
 	}
 

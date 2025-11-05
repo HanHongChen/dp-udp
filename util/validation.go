@@ -2,67 +2,42 @@ package util
 
 import "fmt"
 
-func AnalyzePacket(ipPacket []byte) (bool, bool, uint64, error) {
-	// fmt.Printf("=== PACKET STRUCTURE ANALYSIS ===\n")
-	// fmt.Printf("Total packet length: %d bytes\n", len(ipPacket))
-
-	// Basic IP header validation
-	if len(ipPacket) < 20 {
-		return false, false, 0, fmt.Errorf("packet too short for IP header")
+func IsIperf3Datagram(data []byte) (bool, uint64) {
+	// Basic IPv4 checks
+	if !IsValidIPPacket(data) {
+		return false, 0
 	}
 
-	// fmt.Printf("Version: %02x, Len: %02x, Protocol(UDP 0x11, TCP 0x06, ICMP 0x01):  %02x\n",
-	// 	(ipPacket[0] >> 4), (ipPacket[0] & 0x0F), ipPacket[9])
-
-	// Check if it's IPv4
-	if (ipPacket[0] >> 4) != 4 {
-		return false, false, 0, fmt.Errorf("not an IPv4 packet")
+	// Must be UDP
+	if !IsUDPPacket(data) {
+		return false, 0
 	}
 
-	protocol := ipPacket[9]
+	// IP header length (IHL) in bytes
+	ihl := int(data[0]&0x0F) * 4
 
-	// 檢查協議類型
-	switch protocol {
-	case 6: // TCP
-		// fmt.Printf("TCP packet detected - control message, should skip\n")
-		return true, false, 0, nil
-
-	case 1: // ICMP
-		return false, false, 0, fmt.Errorf("ICMP control packet detected - not relevant\n")
-
-	case 2: // IGMP
-		return false, false, 0, fmt.Errorf("IGMP control packet detected - not relevant\n")
-
-	case 17: // UDP
-		// fmt.Printf("UDP packet detected - analyzing content\n")
-
-	default:
-		return false, false, 0, fmt.Errorf("unknown protocol %d detected - not relevant\n", protocol)
+	// Ensure we have UDP header (8 bytes) present
+	if len(data) < ihl+8 {
+		return false, 0
 	}
 
-	ihl := int(ipPacket[0]&0x0F) * 4
-	udpPayloadStart := ihl + 8
+	// UDP payload starts after IP header + 8 bytes UDP header
+	udpPayload := data[ihl+8:]
 
-	// 檢查 UDP header 長度
-	if len(ipPacket) < udpPayloadStart {
-		return false, false, 0, fmt.Errorf("UDP packet too short for UDP header\n")
+	// iperf3 UDP datagram uses at least 12 bytes of header in payload
+	// (we expect sequence number at payload offset 8..11)
+	if len(udpPayload) < 12 {
+		// It's a UDP packet but too short to contain iperf3 header/sequence
+		return false, 0
 	}
 
-	// 檢查是否有足夠長度包含 iperf3 header
-	if len(ipPacket) < udpPayloadStart+12 {
-		return false, true, 0, nil // UDP 封包，但沒有 iperf3 header，不套用 packet elimination
-	}
-
-	// 提取 iperf3 序號
-	udpPayload := ipPacket[udpPayloadStart:]
-
-	// Extract iperf3 sequence number (32-bit, big-endian, at offset 8)
-	seqNum := uint64(udpPayload[8])<<24 |
+	// Extract iperf3 sequence number (32-bit big-endian) at offset 8
+	seq := uint64(udpPayload[8])<<24 |
 		uint64(udpPayload[9])<<16 |
 		uint64(udpPayload[10])<<8 |
 		uint64(udpPayload[11])
 
-	return false, false, seqNum, nil // UDP 封包且有 iperf3 header，套用 packet elimination
+	return true, seq
 }
 
 // extractIperf3SeqNum extracts iperf3 sequence number from IP packet

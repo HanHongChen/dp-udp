@@ -22,10 +22,10 @@ func newUdpClient(bindAddr string, bindPort int, remoteAddr string, remotePort i
 	}
 }
 
-// func tuneUDP(c *net.UDPConn) {
-// 	c.SetReadBuffer(16 << 20) // 16 MiB
-// 	c.SetWriteBuffer(16 << 20)
-// }
+func tuneUDP(c *net.UDPConn) {
+	c.SetReadBuffer(64 << 20) // 16 MiB
+	c.SetWriteBuffer(64 << 20)
+}
 
 func (c *udpClient) connect() error {
 	// Resolve local bind address
@@ -47,7 +47,7 @@ func (c *udpClient) connect() error {
 	}
 
 	c.conn = conn
-	// tuneUDP(c.conn)
+	tuneUDP(c.conn)
 	return nil
 }
 

@@ -2,7 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/sha512"
 	"net"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/HanHongChen/dp-udp/constant"
 	"github.com/HanHongChen/dp-udp/logger"
@@ -10,10 +14,13 @@ import (
 	"github.com/HanHongChen/dp-udp/tun"
 	"github.com/HanHongChen/dp-udp/util"
 
-	"github.com/cespare/xxhash/v2"
-
 	"github.com/cornelk/hashmap"
 	"github.com/songgao/water"
+)
+
+const (
+	WRITE_BATCH_MAX   = 1000                  // batch size
+	WRITE_BATCH_DELAY = 10 * time.Millisecond // batch delay time
 )
 
 type DpUdpServer struct {
@@ -30,17 +37,19 @@ type DpUdpServer struct {
 	readFromUdp1 chan []byte
 	readFromUdp2 chan []byte
 
-	writeToTun chan []byte
-
+	writeToTun    chan []byte
+	eliminateChan chan []byte
 	// Client address mapping
 	clientAddrs1 *hashmap.Map[string, *net.UDPAddr]
 	clientAddrs2 *hashmap.Map[string, *net.UDPAddr]
 
-	packetMap *hashmap.Map[uint64, struct{}]
-	iperfMap  *hashmap.Map[uint64, struct{}]
-	// Thread-safe packet Eliminator
-	count uint64
+	packetMap sync.Map // key: uint64, value: struct{}
+	iperfMap  sync.Map
 
+	// Thread-safe packet Eliminator
+	count    uint64
+	dupCount uint64
+	dupSeq   uint64
 	*logger.ServerLogger
 }
 
@@ -53,18 +62,18 @@ func NewDpUdpServer(config *model.ServerConfig, serverLogger *logger.ServerLogge
 		tunnelDeviceIP:    config.ServerIE.TunnelDevice.IP,
 		tunnelRoutePrefix: config.ServerIE.TunnelDevice.RoutePrefix,
 
-		readFromTun:  make(chan []byte, 2097152),
-		readFromUdp1: make(chan []byte, 2097152),
-		readFromUdp2: make(chan []byte, 2097152),
+		readFromTun:  make(chan []byte),
+		readFromUdp1: make(chan []byte),
+		readFromUdp2: make(chan []byte),
 
-		writeToTun: make(chan []byte, 2097152),
+		writeToTun:    make(chan []byte),
+		eliminateChan: make(chan []byte),
 
 		count:        0,
+		dupCount:     0,
+		dupSeq:       0,
 		clientAddrs1: hashmap.New[string, *net.UDPAddr](),
 		clientAddrs2: hashmap.New[string, *net.UDPAddr](),
-
-		packetMap: hashmap.New[uint64, struct{}](),
-		iperfMap:  hashmap.New[uint64, struct{}](),
 
 		ServerLogger: serverLogger,
 	}
@@ -92,13 +101,13 @@ func (s *DpUdpServer) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start goroutines
 	go s.readFromTunnelDevice(ctx)
 	go s.dispatchFromTunnel(ctx)
 
 	go s.readFromUdp1Connection(ctx)
 	go s.readFromUdp2Connection(ctx)
 	go s.writeToTunnelDevice(ctx)
+	go s.startEliminatorWorkers(ctx)
 
 	s.ServerLog.Infof("DpUdpServer started successfully")
 	return nil
@@ -130,7 +139,9 @@ func (s *DpUdpServer) Stop() {
 	}
 
 	s.ServerLog.Infof("DpUdpServer stopped")
-	s.ServerLog.Warnf("count = %d", s.count)
+	s.ServerLog.Infof("count = %d", atomic.LoadUint64(&s.count))
+	s.ServerLog.Infof("dupCount = %d", atomic.LoadUint64(&s.dupCount))
+	s.ServerLog.Infof("dupSeq = %d", atomic.LoadUint64(&s.dupSeq))
 }
 
 func (s *DpUdpServer) initTunnelDevice() error {
@@ -191,7 +202,8 @@ func (s *DpUdpServer) readFromUdp1Connection(ctx context.Context) {
 			// Store client address for response routing
 			clientKey := addr.String()
 			s.clientAddrs1.Set(clientKey, addr)
-			s.writeToTun <- data
+			s.eliminateChan <- data
+
 		}
 	}
 }
@@ -219,58 +231,99 @@ func (s *DpUdpServer) readFromUdp2Connection(ctx context.Context) {
 			// Store client address for response routing
 			clientKey := addr.String()
 			s.clientAddrs2.Set(clientKey, addr)
-			s.writeToTun <- data
+			s.eliminateChan <- data
 		}
 	}
 }
 
 func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data := <-s.writeToTun:
+	writeChan := s.writeToTun
 
-			if s.packetEliminate(data) {
-				continue
+	go func() {
+		ticker := time.NewTicker(WRITE_BATCH_DELAY)
+		defer ticker.Stop()
+
+		batch := make([][]byte, 0, WRITE_BATCH_MAX)
+
+		flush := func() {
+			for _, data := range batch {
+				atomic.AddUint64(&s.count, 1)
+				if _, err := s.tunnelDevice.Write(data); err != nil {
+					s.ServerLog.Errorf("Write to tunnel device failed: %v", err)
+				}
 			}
+			batch = batch[:0]
+		}
 
-			// if isIperf, seq := util.IsIperf3Datagram(data); isIperf {
-			// 	s.ServerLog.Warnf("寫入 seq = %d\n", seq)
-			// }
-			s.count++
-			if _, err := s.tunnelDevice.Write(data); err != nil {
-				s.ServerLog.Errorf("Write to tunnel device failed: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				if len(batch) > 0 {
+					flush()
+				}
+				return
+			case data := <-writeChan:
+				batch = append(batch, data)
+				if len(batch) >= WRITE_BATCH_MAX {
+					flush()
+				}
+			case <-ticker.C:
+				if len(batch) > 0 {
+					flush()
+				}
 			}
 		}
+	}()
+
+	<-ctx.Done()
+}
+
+func (s *DpUdpServer) startEliminatorWorkers(ctx context.Context) {
+	numWorkers := 4
+	for i := 0; i < numWorkers; i++ {
+		go func(workerID int) {
+			s.ServerLog.Infof("Eliminator worker %d started", workerID)
+			for {
+				select {
+				case <-ctx.Done():
+					s.ServerLog.Infof("Eliminator worker %d stopping", workerID)
+					return
+				case packet := <-s.eliminateChan:
+					if s.packetEliminate(packet) {
+						continue
+					}
+					s.writeToTun <- packet
+				}
+			}
+		}(i)
 	}
 }
 
+// true: packet eliminated, false: packet passed
 func (s *DpUdpServer) packetEliminate(packet []byte) bool {
 	if isIperf, seq := util.IsIperf3Datagram(packet); isIperf {
-		if _, ok := s.iperfMap.Get(seq); ok {
-			// s.iperfMap.Del(seq)
+
+		_, loaded := s.iperfMap.LoadOrStore(seq, struct{}{})
+		if loaded {
 			s.TunLog.Debugf("Eliminated iperf3 packet seq %d", seq)
 			s.TunLog.Tracef("Eliminated iperf3 packet seq %d, %x", seq, packet)
+
+			atomic.AddUint64(&s.dupSeq, 1)
 			return true
 		}
-		s.iperfMap.Set(seq, struct{}{})
 	} else {
-		h := xxhash.Sum64(packet)
-		if _, ok := s.packetMap.Get(h); ok {
-			s.packetMap.Del(h)
+		// non-iperf3 packet elimination based on hash
+		h := sha512.Sum512(packet)
+		_, loaded := s.packetMap.LoadOrStore(h, struct{}{})
+		if loaded {
 			s.TunLog.Debugf("Eliminated packet %d", h)
 			s.TunLog.Tracef("Eliminated packet %d, %x", h, packet)
+			atomic.AddUint64(&s.dupCount, 1)
+
 			return true
 		}
-		// s.writeToTun <- packet
-		s.packetMap.Set(h, struct{}{})
-		s.TunLog.Debugf("Packet %d stored", h)
-		s.TunLog.Tracef("Packet %d stored, %x", h, packet)
 	}
-
 	return false
-
 }
 
 // Dispatch packets read from tunnel device to all connected UDP clients
@@ -280,7 +333,6 @@ func (s *DpUdpServer) dispatchFromTunnel(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case data := <-s.readFromTun:
-			// Dispatch to all connected clients on both UDP connections
 			data1 := make([]byte, len(data))
 			copy(data1, data)
 			data2 := make([]byte, len(data))
