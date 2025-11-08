@@ -13,12 +13,13 @@ SESSION="exp_ue"
 tmux kill-session -t $SESSION 2>/dev/null || true
 
 tmux new-session -d -s $SESSION
-tmux send-keys -t $SESSION:0.0 "tcpdump -i uesimtun0 udp -w $EXP_DIR/exp1-ue1-ul-60s-client.pcap" C-m
+tmux send-keys -t $SESSION:0.0 "tcpdump -i ueTun1 udp -w $EXP_DIR/exp1-ue1-ul-80s-5M-client.pcap" C-m
 tmux split-window -h -l 40 -t $SESSION:0.0
-tmux send-keys -t $SESSION:0.1 "tcpdump -i uesimtun1 udp -w $EXP_DIR/exp1-ue2-ul-60s-client.pcap" C-m
-tmux split-window -v -l 15 -t $SESSION:0.1
-tmux send-keys -t $SESSION:0.2 "iperf3 -c 192.168.58.20 -B 10.60.0.1 -t 60 -u & iperf3 -c 192.168.59.20 -B 10.63.0.1 -t 60 -u" C-m
-tmux select-pane -t $SESSION:0.2
+# tmux send-keys -t $SESSION:0.1 "tcpdump -i ueTun2 udp -w $EXP_DIR/exp1-ue2-ul-80s-5M-client.pcap" C-m
+# tmux split-window -v -l 15 -t $SESSION:0.1
+# tmux send-keys -t $SESSION:0.1 "iperf3 -c 192.168.58.20 -B 10.60.0.1 -u -t 80 -b 5M & iperf3 -c 192.168.59.20 -B 10.63.0.1 -t 80 -b 5M -u &" C-m
+tmux send-keys -t $SESSION:0.1 "iperf3 -c 192.168.58.20 -B 10.60.0.1 -u -t 80 -b 5M" C-m
+tmux select-pane -t $SESSION:0.1
 tmux attach -t $SESSION
 
 # ====== tmux usage tips ======

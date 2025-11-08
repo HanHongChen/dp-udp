@@ -1,12 +1,12 @@
 client:
   udp1_remote_addr: 192.168.58.20   # Connect to server remote address
-  udp1_remote_port: 31415
+  udp1_remote_port: 31420
   udp1_bind_addr: 192.168.56.10     # VM enp0s8 interface (local bind)
-  udp1_bind_port: 31416
+  udp1_bind_port: 31421
   udp2_remote_addr: 192.168.59.20   # Connect to server remote address
-  udp2_remote_port: 31417
+  udp2_remote_port: 31422
   udp2_bind_addr: 192.168.57.10     # VM enp0s9 interface (local bind)
-  udp2_bind_port: 31418
+  udp2_bind_port: 31423
 
   tunnel_device:
     name: dpUdpTunClientVM

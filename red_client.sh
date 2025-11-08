@@ -46,7 +46,9 @@ if [[ "$PANE_COUNT" -ge 2 ]]; then
     # 3. Split vertically to create pane 0.1
     tmux split-window -v -l 15 -t $SESSION:0.0
     # 4. Execute command in the middle pane (pane 0.1)
-    tmux send-keys -t $SESSION:0.1 "'iperf3 -c 192.180.20.10 -B 192.180.10.10 -u -t '" C-m
+    # --bind-dev dpUdpTunClient
+    # iperf3 -c 192.180.20.10 -B 192.180.10.10 -u -l 1150
+    tmux send-keys -t $SESSION:0.1 "iperf3 -c 192.180.20.10 -B 192.180.10.10 -u -t 1 -b 10M " C-m
     tmux select-pane -t $SESSION:0.1
 fi
 
@@ -56,10 +58,10 @@ if [[ "$PANE_COUNT" -ge 3 ]]; then
     # 6. Run tcpdump in the rightmost pane (pane 0.2)
     if [[ "$EXP_TAG" == "exp2" ]]; then
         # exp2: tcpdump 檔名包含 det/5g
-        tmux send-keys -t $SESSION:0.2 "tcpdump -i dpUdpTunClient udp -w $EXP_DIR/${EXP_TAG}-$SUFFIX-red-60s-client.pcap" C-m
+        tmux send-keys -t $SESSION:0.2 "tcpdump -i dpUdpTunClient udp -w $EXP_DIR/${EXP_TAG}-$SUFFIX-red-80s-5M-client.pcap" C-m
     else
         # exp1: tcpdump 檔名不包含 det/5g
-        tmux send-keys -t $SESSION:0.2 "tcpdump -i dpUdpTunClient udp -w $EXP_DIR/${EXP_TAG}-red-dl-60s-client.pcap" C-m
+        tmux send-keys -t $SESSION:0.2 "tcpdump -i dpUdpTunClient udp -w $EXP_DIR/${EXP_TAG}-red-ul-80s-5M-client.pcap" C-m
     fi
     tmux select-pane -t $SESSION:0.1
 fi

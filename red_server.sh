@@ -50,10 +50,10 @@ if [[ "$PANE_COUNT" -ge 3 ]]; then
     tmux split-window -h -l 30 -t $SESSION:0.1
     if [[ "$EXP_TAG" == "exp2" ]]; then
         # exp2: tcpdump 檔名包含 det/5g
-        tmux send-keys -t $SESSION:0.2 "sudo tcpdump -i dpUdpTunServer udp -w $EXP_DIR/${EXP_TAG}-$SUFFIX-red-60s-server.pcap" C-m
+        tmux send-keys -t $SESSION:0.2 "sudo tcpdump -i dpUdpTunServer udp -w $EXP_DIR/${EXP_TAG}-$SUFFIX-red-80s-5M-server.pcap" C-m
     else
         # exp1: tcpdump 檔名不包含 det/5g
-        tmux send-keys -t $SESSION:0.2 "sudo tcpdump -i dpUdpTunServer udp -w $EXP_DIR/${EXP_TAG}-red-dl-60s-server.pcap" C-m
+        tmux send-keys -t $SESSION:0.2 "sudo tcpdump -i dpUdpTunServer udp -w $EXP_DIR/${EXP_TAG}-red-ul-80s-5M-server.pcap" C-m
     fi
     tmux select-pane -t $SESSION:0.2
 fi

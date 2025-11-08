@@ -1,12 +1,12 @@
 client:
   udp1_remote_addr: 192.168.58.20
-  udp1_remote_port: 31415
+  udp1_remote_port: 31420
   udp1_bind_addr: 10.60.0.1
-  udp1_bind_port: 31416
+  udp1_bind_port: 31421
   udp2_remote_addr: 192.168.59.20
-  udp2_remote_port: 31417
+  udp2_remote_port: 31422
   udp2_bind_addr: 10.63.0.1
-  udp2_bind_port: 31418
+  udp2_bind_port: 31423
   tunnel_device:
     name: dpUdpTunClient
     ip: 192.180.10.10
