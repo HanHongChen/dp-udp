@@ -3,11 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha512"
-	"fmt"
 	"net"
-	"net/http"
-	pprof "net/http/pprof"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,48 +115,48 @@ func (s *DpUdpServer) Start(ctx context.Context) error {
 	go s.writeToTunnelDevice(ctx)
 	go s.startEliminatorWorkers(ctx)
 
-	go s.startRuntimeMonitor(ctx, "127.0.0.1:6060")
+	// go s.startRuntimeMonitor(ctx, "127.0.0.1:6060")
 
 	s.ServerLog.Infof("DpUdpServer started successfully")
 	return nil
 }
 
-func (s *DpUdpServer) startRuntimeMonitor(ctx context.Context, addr string) {
-	// pprof mux
-	mux := http.NewServeMux()
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	go func() {
-		s.ServerLog.Infof("pprof listening on http://%s/debug/pprof/", addr)
-		if err := http.ListenAndServe(addr, mux); err != nil {
-			s.ServerLog.Errorf("pprof server error: %v", err)
-		}
-	}()
+// func (s *DpUdpServer) startRuntimeMonitor(ctx context.Context, addr string) {
+// 	// pprof mux
+// 	mux := http.NewServeMux()
+// 	mux.HandleFunc("/debug/pprof/", pprof.Index)
+// 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+// 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+// 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+// 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+// 	go func() {
+// 		s.ServerLog.Infof("pprof listening on http://%s/debug/pprof/", addr)
+// 		if err := http.ListenAndServe(addr, mux); err != nil {
+// 			s.ServerLog.Errorf("pprof server error: %v", err)
+// 		}
+// 	}()
 
-	tk := time.NewTicker(2 * time.Second)
-	defer tk.Stop()
+// 	tk := time.NewTicker(2 * time.Second)
+// 	defer tk.Stop()
 
-	var ms runtime.MemStats
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tk.C:
-			runtime.ReadMemStats(&ms)
-			g := runtime.NumGoroutine()
-			s.ServerLog.Debugf(
-				"[MON] goroutines=%d alloc=%dKB gc=%d ch{rTun=%d, rU1=%d, rU2=%d, wU1=%d, wU2=%d, wTun=%d, elim=%d}",
-				g, ms.Alloc/1024, ms.NumGC,
-				len(s.readFromTun), len(s.readFromUdp1), len(s.readFromUdp2),
-				len(s.writeToUdp1), len(s.writeToUdp2),
-				len(s.writeToTun), len(s.eliminateChan),
-			)
-		}
-	}
-}
+// 	var ms runtime.MemStats
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		case <-tk.C:
+// 			runtime.ReadMemStats(&ms)
+// 			g := runtime.NumGoroutine()
+// 			s.ServerLog.Debugf(
+// 				"[MON] goroutines=%d alloc=%dKB gc=%d ch{rTun=%d, rU1=%d, rU2=%d, wU1=%d, wU2=%d, wTun=%d, elim=%d}",
+// 				g, ms.Alloc/1024, ms.NumGC,
+// 				len(s.readFromTun), len(s.readFromUdp1), len(s.readFromUdp2),
+// 				len(s.writeToUdp1), len(s.writeToUdp2),
+// 				len(s.writeToTun), len(s.eliminateChan),
+// 			)
+// 		}
+// 	}
+// }
 
 func (s *DpUdpServer) Stop() {
 	s.ServerLog.Infof("DpUdpServer stopping...")
@@ -315,41 +311,33 @@ func (s *DpUdpServer) writeToTunnelDevice(ctx context.Context) {
 }
 
 func (s *DpUdpServer) startEliminatorWorkers(ctx context.Context) {
-	numWorkers := 4
-	for i := 0; i < numWorkers; i++ {
-		go func(workerID int) {
-			s.ServerLog.Infof("Eliminator worker %d started", workerID)
-			for {
-				select {
-				case <-ctx.Done():
-					s.ServerLog.Infof("Eliminator worker %d stopping", workerID)
-					return
-				case packet := <-s.eliminateChan:
-					if s.packetEliminate(packet) {
-						continue
-					}
-					s.writeToTun <- packet
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case packet := <-s.eliminateChan:
+			if s.packetEliminate(packet) {
+				continue
 			}
-		}(i)
+			s.writeToTun <- packet
+		}
 	}
+
 }
 
 // true: packet eliminated, false: packet passed
 func (s *DpUdpServer) packetEliminate(packet []byte) bool {
 	if isIperf, seq := util.IsIperf3Datagram(packet); isIperf {
-		fmt.Printf("進來 %d\n", seq)
 		_, loaded := s.iperfMap.LoadOrStore(seq, struct{}{})
-		atomic.AddUint64(&s.dupCount, 1)
+		// atomic.AddUint64(&s.dupCount, 1)
 
 		if loaded {
-			fmt.Printf("%d 重複\n", seq)
+			// fmt.Printf("%d 重複\n", seq)
 			s.TunLog.Debugf("Eliminated iperf3 packet seq %d", seq)
 			s.TunLog.Tracef("Eliminated iperf3 packet seq %d, %x", seq, packet)
 
 			atomic.AddUint64(&s.dupSeq, 1)
 			return true
-			// return false
 		}
 	} else {
 		// non-iperf3 packet elimination based on hash
@@ -360,7 +348,6 @@ func (s *DpUdpServer) packetEliminate(packet []byte) bool {
 			s.TunLog.Tracef("Eliminated packet %d, %x", h, packet)
 
 			return true
-			// return false
 		}
 	}
 	return false
@@ -377,36 +364,6 @@ func (s *DpUdpServer) dispatchFromTunnel(ctx context.Context) {
 			s.writeToUdp2 <- data
 		}
 	}
-
-	// for {
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		return
-	// 	case data := <-s.readFromTun:
-	// 		data1 := make([]byte, len(data))
-	// 		copy(data1, data)
-	// 		data2 := make([]byte, len(data))
-	// 		copy(data2, data)
-
-	// 		go func() {
-	// 			s.clientAddrs1.Range(func(key string, addr *net.UDPAddr) bool {
-	// 				if err := s.udpServer1.write(data1, addr); err != nil {
-	// 					s.ServerLog.Errorf("UDP 1 server write to %s failed: %v", addr, err)
-	// 				}
-	// 				return true
-	// 			})
-	// 		}()
-
-	// 		go func() {
-	// 			s.clientAddrs2.Range(func(key string, addr *net.UDPAddr) bool {
-	// 				if err := s.udpServer2.write(data2, addr); err != nil {
-	// 					s.ServerLog.Errorf("UDP 2 server write to %s failed: %v", addr, err)
-	// 				}
-	// 				return true
-	// 			})
-	// 		}()
-	// 	}
-	// }
 }
 
 func (s *DpUdpServer) sendToUdp1(ctx context.Context) {
