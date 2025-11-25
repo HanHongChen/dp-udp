@@ -12,6 +12,7 @@ client:
     name: dpUdpTunClientVM
     ip: 192.180.10.10               # Updated IP as requested
     route_prefix: 16
+  redundant: true
 
 logger:
   level: info

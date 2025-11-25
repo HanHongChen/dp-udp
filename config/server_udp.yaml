@@ -8,6 +8,7 @@ server:
     name: dpUdpTunServer
     ip: 192.180.20.10
     route_prefix: 16
+  redundant: true
 
 logger:
   level: info

@@ -11,6 +11,7 @@ client:
     name: dpUdpTunClient
     ip: 192.180.10.10
     route_prefix: 16
+  redundant: true
 
 logger:
   level: info

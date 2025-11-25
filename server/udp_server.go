@@ -48,6 +48,8 @@ type DpUdpServer struct {
 	packetMap sync.Map // key: uint64, value: struct{}
 	iperfMap  sync.Map
 
+	redundant bool
+
 	// Thread-safe packet Eliminator
 	count    uint64
 	dupCount uint64
@@ -73,6 +75,8 @@ func NewDpUdpServer(config *model.ServerConfig, serverLogger *logger.ServerLogge
 		writeToTun:    make(chan []byte, 10000),
 		eliminateChan: make(chan []byte, 10000),
 
+		redundant: config.ServerIE.Redundant,
+
 		count:        0,
 		dupCount:     0,
 		dupSeq:       0,
@@ -93,11 +97,14 @@ func (s *DpUdpServer) Start(ctx context.Context) error {
 	}
 	s.ServerLog.Infof("UDP 1 server listening on %s:%d", s.udpServer1.listenAddr, s.udpServer1.listenPort)
 
-	if err := s.udpServer2.listen(); err != nil {
-		s.ServerLog.Errorf("UDP 2 server listen failed: %v", err)
-		return err
+	s.ServerLog.Warnf("redundant = %v", s.redundant)
+	if s.redundant {
+		if err := s.udpServer2.listen(); err != nil {
+			s.ServerLog.Errorf("UDP 2 server listen failed: %v", err)
+			return err
+		}
+		s.ServerLog.Infof("UDP 2 server listening on %s:%d", s.udpServer2.listenAddr, s.udpServer2.listenPort)
 	}
-	s.ServerLog.Infof("UDP 2 server listening on %s:%d", s.udpServer2.listenAddr, s.udpServer2.listenPort)
 
 	// Initialize tunnel device
 	if err := s.initTunnelDevice(); err != nil {
@@ -108,10 +115,13 @@ func (s *DpUdpServer) Start(ctx context.Context) error {
 	go s.readFromTunnelDevice(ctx)
 	go s.dispatchFromTunnel(ctx)
 	go s.sendToUdp1(ctx)
-	go s.sendToUdp2(ctx)
+	if s.redundant {
+		s.ServerLog.Warnf("Start sendToUdp2 and readFromUdp2Conn, %v", s.redundant)
+		go s.sendToUdp2(ctx)
+		go s.readFromUdp2Connection(ctx)
+	}
 
 	go s.readFromUdp1Connection(ctx)
-	go s.readFromUdp2Connection(ctx)
 	go s.writeToTunnelDevice(ctx)
 	go s.startEliminatorWorkers(ctx)
 
@@ -361,7 +371,9 @@ func (s *DpUdpServer) dispatchFromTunnel(ctx context.Context) {
 			return
 		case data := <-s.readFromTun:
 			s.writeToUdp1 <- data
-			s.writeToUdp2 <- data
+			if s.redundant {
+				s.writeToUdp2 <- data
+			}
 		}
 	}
 }

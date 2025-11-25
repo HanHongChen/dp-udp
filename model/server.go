@@ -12,5 +12,5 @@ type ServerIE struct {
 	UDP2ListenPort int    `yaml:"udp2_listen_port" valid:"required"`
 
 	TunnelDevice TunnelDevice `yaml:"tunnel_device" valid:"required"`
+	Redundant    bool         `yaml:"redundant" valid:"required"`
 }
-

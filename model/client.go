@@ -16,4 +16,5 @@ type ClientIE struct {
 	UDP2RemotePort int    `yaml:"udp2_remote_port" valid:"required"`
 
 	TunnelDevice TunnelDevice `yaml:"tunnel_device" valid:"required"`
+	Redundant    bool         `yaml:"redundant" valid:"required"`
 }

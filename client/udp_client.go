@@ -39,6 +39,8 @@ type DpUdpClient struct {
 	writeToTun    chan []byte
 	eliminateChan chan []byte
 
+	redundant bool
+
 	count    uint64
 	dupCount uint64
 	seqCount uint64
@@ -68,11 +70,11 @@ func NewDpUdpClient(config *model.ClientConfig, clientLogger *logger.ClientLogge
 
 		writeToTun:    make(chan []byte, 10000),
 		eliminateChan: make(chan []byte),
-
-		count:    0,
-		dupCount: 0,
-		seqCount: 0,
-		count1:   0,
+		redundant:     config.ClientIE.Redundant,
+		count:         0,
+		dupCount:      0,
+		seqCount:      0,
+		count1:        0,
 
 		// packetMap: hashmap.New[uint64, struct{}](),
 
@@ -90,12 +92,15 @@ func (c *DpUdpClient) Start(ctx context.Context) error {
 	}
 	c.ClientLog.Infof("UDP 1 client connected to %s:%d", c.udpClient1.remoteAddr, c.udpClient1.remotePort)
 
-	if err := c.udpClient2.connect(); err != nil {
-		c.ClientLog.Errorf("UDP 2 client connect failed: %v", err)
-		return err
-	}
-	c.ClientLog.Infof("UDP 2 client connected to %s:%d", c.udpClient2.remoteAddr, c.udpClient2.remotePort)
+	c.ClientLog.Warnf("redundant = %v", c.redundant)
 
+	if c.redundant {
+		if err := c.udpClient2.connect(); err != nil {
+			c.ClientLog.Errorf("UDP 2 client connect failed: %v", err)
+			return err
+		}
+		c.ClientLog.Infof("UDP 2 client connected to %s:%d", c.udpClient2.remoteAddr, c.udpClient2.remotePort)
+	}
 	// Initialize tunnel device
 	if err := c.initTunnelDevice(); err != nil {
 		c.ClientLog.Errorf("Tunnel device initialization failed: %v", err)
@@ -106,10 +111,13 @@ func (c *DpUdpClient) Start(ctx context.Context) error {
 	go c.readFromTunnelDevice(ctx)
 	go c.dispatchFromTunnel(ctx)
 	go c.sendToUdp1(ctx)
-	go c.sendToUdp2(ctx)
+	if c.redundant {
+		c.ClientLog.Warnf("Start sendToUdp2 and readFromUdp2Conn, %v", c.redundant)
 
+		go c.sendToUdp2(ctx)
+		go c.readFromUdp2Connection(ctx)
+	}
 	go c.readFromUdp1Connection(ctx)
-	go c.readFromUdp2Connection(ctx)
 	go c.writeToTunnelDevice(ctx)
 	go c.startEliminatorWorkers(ctx)
 
@@ -344,7 +352,9 @@ func (c *DpUdpClient) dispatchFromTunnel(ctx context.Context) {
 			return
 		case data := <-c.readFromTun:
 			c.writeToUdp1 <- data
-			c.writeToUdp2 <- data
+			if c.redundant {
+				c.writeToUdp2 <- data
+			}
 		}
 	}
 }
