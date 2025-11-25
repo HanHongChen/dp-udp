@@ -364,27 +364,51 @@ def _auto_unit_from_bps(max_bps: float) -> str:
 def _plot_throughput_timeline(label: str, ts: np.ndarray, sizes_bytes: np.ndarray, win_sec: float, out_png: str,
                               step_sec: Optional[float] = None, ymax: Optional[float] = None,
                               unit: str = "auto", q_auto: float = 0.95, use_bar: bool = False):
-    # 一律用折線圖（忽略 bar/面積）
+    # 忽略 bar，用折線圖
     use_bar = False
+
     tt, bytes_sum, counts = _window_bins(ts, sizes_bytes, win_sec, step_sec)
     t0 = ts[0] if ts.size else 0.0
     bps = (bytes_sum * 8.0) / win_sec if tt.size else np.array([])
     pps = (counts.astype(float)) / win_sec if tt.size else np.array([])
+
+    # --- 自動判斷單位 ---
     if unit == "auto":
         max_bps = float(np.max(bps)) if bps.size else 0.0
         unit = _auto_unit_from_bps(max_bps)
+
     if unit == "pps":
-        vv = pps; y_label = f"Packets/s (win={win_sec:.2f}s)"
+        vv = pps
+        y_label = "Packets/s"
     elif unit == "kbps":
-        vv = bps / 1e3; y_label = f"Throughput (Kbit/s) (win={win_sec:.2f}s)"
+        vv = bps / 1e3
+        y_label = "Throughput (Kbps)"
     else:
-        vv = bps / 1e6; y_label = f"Throughput (Mbit/s) (win={win_sec:.2f}s)"
+        vv = bps / 1e6
+        y_label = "Throughput (Mbps)"
+
+    # --- 從 prefix 擷取頻寬標籤，例如 10M、5Mbps ---
+    import re
+    m = re.search(r"(\d+\.?\d*)\s*(M|Mbps)", out_png, re.IGNORECASE)
+    rate_label = f"{m.group(1)}M" if m else ""
+
+    # --- 從 label 判斷是否冗餘 ---
+    l_lower = label.lower()
+    if any(x in l_lower for x in ["nored", "no_red", "no-red", "without", "wored"]):
+        redundancy = "Without redundant"
+    elif any(x in l_lower.split("_") + l_lower.split("-") + [l_lower] for x in ["red", "withred", "with_red"]):
+        redundancy = "With redundant"
+    else:
+        redundancy = label  # fallback
+
+    # --- 繪圖 ---
     plt.figure(figsize=(9, 3))
     if tt.size > 0:
         x = tt - t0
         plt.plot(x, vv, "-", lw=1.8, color="#2ca02c")
         plt.scatter(x, vv, s=10, color="#2ca02c", alpha=0.9)
-        if ymax is not None and ymax > 0:
+
+        if ymax and ymax > 0:
             plt.ylim(0, ymax)
         else:
             nz = vv[vv > 0]
@@ -393,17 +417,59 @@ def _plot_throughput_timeline(label: str, ts: np.ndarray, sizes_bytes: np.ndarra
                 y_top = max(y_top, float(np.max(nz)) * 1.05)
             else:
                 y_top = float(np.max(vv)) * 1.2 if vv.size else 1.0
-            plt.ylim(0, max(0.5 if unit == "pps" else 0.01, y_top))
+            plt.ylim(0, max(0.01, y_top))
     else:
-        plt.text(0.5, 0.5, "No windows", ha="center", va="center", transform=plt.gca().transAxes)
+        plt.text(0.5, 0.5, "No data", ha="center", va="center", transform=plt.gca().transAxes)
         plt.ylim(0, 1.0)
-    plt.xlabel("Time since start (s)")
+
+    plt.xlabel("Time (second)")
     plt.ylabel(y_label)
-    plt.title(f"{label} - Throughput timeline ({unit})")
+    if "detnet" in l_lower:
+        system = "DetNet"
+    elif "5g" in l_lower or "nr" in l_lower:
+        system = "5G"
+    else:
+        system = ""
+
+    # --- 標題組合 ---
+    if system:
+        plt.title(f"{system} – {redundancy} – Throughput: {rate_label}")
+    else:
+        plt.title(f"{redundancy} – Throughput: {rate_label}")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(out_png, dpi=150)
     plt.close()
+
+def _plot_loss_bar_comparison(prefix: str, loss_data: dict, outdir: str):
+    """
+    loss_data: dict like {'5G_10M': {'With': 0.0, 'Without': 0.3801}, 'DetNet_10M': {...}}
+    """
+    for key, vals in loss_data.items():
+        system_label = key  # e.g. "5G_10M" or "DetNet_10M"
+        loss_with = vals.get("With", 0.0) * 100.0
+        loss_without = vals.get("Without", 0.0) * 100.0
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+        streams = ["With Redundant", "Without Redundant"]
+        losses = [loss_with, loss_without]
+        bars = ax.bar(streams, losses, color=["#4daf4a", "#377eb8"])
+
+        # 在柱子上顯示數值
+        for bar, val in zip(bars, losses):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                    f"{val:.2f}%", ha="center", va="bottom", fontsize=10)
+
+        ax.set_ylabel("Packet Loss Rate (%)")
+        ax.set_xlabel("Stream Type")
+        ax.set_ylim(0, max(50, max(losses) * 1.2))
+        ax.set_title(f"{system_label} - Packet Loss Rate")
+        plt.tight_layout()
+
+        out_png = os.path.join(outdir, f"{prefix}_{system_label}_loss_comparison.png")
+        plt.savefig(out_png, dpi=150)
+        plt.close()
+        print(f"[OK ] plotted {out_png}")
 
 # ---------- CLI ----------
 def parse_label_file(arg: str) -> Tuple[str, str]:
@@ -489,19 +555,19 @@ def main():
             write_rxloss_csv(out_csv, ts_arr, seq_arr)
             print(f"[OK ] wrote {out_csv}")
 
-        if args.plot_iperf:
-            out_seq = os.path.join(args.outdir, f"{args.prefix}_{label}_seq_vs_time.png")
-            out_loss = os.path.join(args.outdir, f"{args.prefix}_{label}_loss_timeline_{args.plot_window_sec:.2f}s.png")
-            _plot_seq_vs_time(label, ts_arr, seq_arr, out_seq)
-            _plot_loss_timeline(
-                label, ts_arr, seq_arr, args.plot_window_sec, out_loss,
-                step_sec=args.plot_step_sec if args.plot_step_sec > 0 else None,
-                ymax=args.plot_ymax if args.plot_ymax > 0 else None,
-                mode=args.loss_mode, fill_empty_100=args.fill_empty_100,
-                reorder_grace_sec=args.loss_reorder_grace
-            )
-            print(f"[OK ] plotted {out_seq}")
-            print(f"[OK ] plotted {out_loss}")
+        # if args.plot_iperf:
+        #     out_seq = os.path.join(args.outdir, f"{args.prefix}_{label}_seq_vs_time.png")
+        #     out_loss = os.path.join(args.outdir, f"{args.prefix}_{label}_loss_timeline_{args.plot_window_sec:.2f}s.png")
+        #     _plot_seq_vs_time(label, ts_arr, seq_arr, out_seq)
+        #     _plot_loss_timeline(
+        #         label, ts_arr, seq_arr, args.plot_window_sec, out_loss,
+        #         step_sec=args.plot_step_sec if args.plot_step_sec > 0 else None,
+        #         ymax=args.plot_ymax if args.plot_ymax > 0 else None,
+        #         mode=args.loss_mode, fill_empty_100=args.fill_empty_100,
+        #         reorder_grace_sec=args.loss_reorder_grace
+        #     )
+        #     print(f"[OK ] plotted {out_seq}")
+        #     print(f"[OK ] plotted {out_loss}")
 
         if args.plot_throughput:
             out_thr = os.path.join(args.outdir, f"{args.prefix}_{label}_throughput_{args.plot_window_sec:.2f}s_{args.throughput_unit}.png")
@@ -515,6 +581,45 @@ def main():
             )            
            
             print(f"[OK ] plotted {out_thr}")
+        loss_summary = {}
+
+    for ent in args.rxloss_iperf:
+        label, rx_pcap = parse_label_file(ent)
+        l_lower = label.lower()
+
+        # Detect system
+        if "detnet" in l_lower:
+            system = "DetNet"
+        elif "5g" in l_lower or "nr" in l_lower:
+            system = "5G"
+        else:
+            system = "Unknown"
+
+        # Detect rate (e.g., "10M", "5M")
+        import re
+        m = re.search(r"(\d+\.?\d*)m", args.prefix, re.IGNORECASE)
+        rate = f"{m.group(1)}M" if m else ""
+
+        key = f"{system}_{rate}"
+
+        # Get corresponding loss
+        ts_arr, seq_arr, size_arr, _ = iperf_rx_seqs(
+            rx_pcap, args.bpf, args.iperf_port,
+            force_offset=args.iperf_offset, force_endian=args.iperf_endian
+        )
+        _, _, _, interior_loss, _ = rxloss_from_seqs(seq_arr)
+        if any(x in l_lower for x in ["nored", "no_red", "no-red", "without", "wored"]):
+            mode = "Without"
+        else:
+            mode = "With"
+
+        if key not in loss_summary:
+            loss_summary[key] = {}
+        loss_summary[key][mode] = interior_loss
+
+    if loss_summary:
+        _plot_loss_bar_comparison(args.prefix, loss_summary, args.outdir)
+
 
 
 if __name__ == "__main__":
