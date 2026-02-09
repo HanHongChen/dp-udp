@@ -118,6 +118,23 @@ After starting, users can use the created network interface for their applicatio
 
         ![ncat](./images/ncat.png)
 
+## Script
+    Execute server side script before execute client side script.
+    ```bash
+        # server side watch more attribute by using below command
+        ./red_server.sh
+        # server side watch more attribute by using below command 
+        ./red_client.sh
+        # base on what kind of experiment execute. 
+        # It needs to generate disconnect situation 
+        # tcp: with tcp
+        # red: with redundant
+        # ue: without redundant
+        # det: disconnect in detnet router
+        # 5g: disconnect in 5g upf
+        ./exp2-[red/ue]-[det/5g].sh
+
+
 ## Appendix
 
 - "github.com/songgao/water": used to bring up network device.
